@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from config import EXITS, MIN_SCORE, RISK
+from desk.clock import desk_now
 
 
 @dataclass
@@ -19,8 +20,9 @@ class Account:
 
 
 def in_quiet_hours(now: datetime | None = None) -> bool:
+    """True during the quiet window, read in the desk timezone. The window is unchanged."""
     start, end = RISK["quiet_hours"]
-    h = (now or datetime.now()).hour
+    h = desk_now(now).hour
     return start <= h < end if start < end else (h >= start or h < end)
 
 

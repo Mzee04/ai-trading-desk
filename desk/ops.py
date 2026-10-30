@@ -10,6 +10,7 @@ from pathlib import Path
 
 import requests
 
+import config
 from config import BENCH_MINUTES, DEFAULT_BENCH
 
 JOURNAL = Path("journal.jsonl")
@@ -36,7 +37,11 @@ class Bench:
         return bool(r and r[0] > time.time())
 
     def sit(self, mint: str, reason: str):
-        mins = BENCH_MINUTES.get(reason, DEFAULT_BENCH)
+        # A queued token sits out for the queue TTL, so the next cycle does not enqueue it again.
+        if reason == "queued":
+            mins = config.ANALYST_QUEUE_TTL_MINUTES
+        else:
+            mins = BENCH_MINUTES.get(reason, DEFAULT_BENCH)
         self.db.execute("INSERT OR REPLACE INTO bench VALUES (?,?,?)",
                         (mint, reason, time.time() + mins * 60))
         self.db.commit()

@@ -31,7 +31,7 @@ The repo ships the core desk. Around it, every tool has one job and no two jobs 
 2. REA deep-dives it: origin, the accounts behind it, past coins on the same story and how they died.
 3. The findings go into an Obsidian note: narrative, likely tickers, kill conditions.
 4. The scanner catches a matching launch on pump.fun.
-5. Chain check first. Then Claude scores it, ChatGPT gives the second read, Jev answers the yes/no gates.
+5. Chain check first. Then the analyst scores it (Claude, or a thesis you submit), ChatGPT gives the second read, Jev answers the yes/no gates.
 6. The risk engine sizes it. You get the alert. You sign or you skip.
 7. Every decision lands in the journal. Sunday's review goes back into Obsidian.
 8. One rule changes per week. Claude Code makes the edit, GitHub keeps the history.

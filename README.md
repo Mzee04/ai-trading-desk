@@ -40,12 +40,23 @@ git clone https://github.com/SpikeCalls/ai-trading-desk.git
 cd ai-trading-desk
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env              # add ANTHROPIC_API_KEY (Telegram + RPC optional)
+cp .env.example .env              # Claude: set ANTHROPIC_API_KEY. External: leave it empty.
 
-make test                         # 17 offline tests, no keys needed
-make shadow                       # one full cycle: scan, check, score, alert. No position.
+make test                         # offline tests, no keys needed
+make shadow                       # one full cycle: scan, check, score or queue. No position.
 make paper                        # paper trading, every 60 seconds
 ```
+
+Claude if `ANTHROPIC_API_KEY` is set. Otherwise the cycle queues survivors and you score them yourself:
+
+```bash
+python run_crypto.py --shadow --once          # append chain-check survivors to analyst_queue.jsonl
+python analyst_inbox.py list                  # pending token address, symbol, queued time
+python analyst_inbox.py submit <TOKEN_ADDRESS> thesis.json
+python analyst_inbox.py submit <TOKEN_ADDRESS> -   # same JSON on stdin
+```
+
+`thesis.json` is a `TokenThesis` (`skip`, `watch`, or `valid_setup`, never `buy`). Submit runs the same risk engine, journal, alert, and paper fill a Claude thesis would. Add `--shadow` to journal and alert without a paper fill. Force the seat with `ANALYST_MODE=claude` or `ANALYST_MODE=external` in `.env`, or set `ANALYST_MODE` in `config.py`.
 
 Stocks on a free Alpaca paper account:
 
@@ -68,7 +79,7 @@ Each seat costs more than the one before it, so each one has to kill harder.
 ```mermaid
 flowchart LR
     A[🚀 Scanner<br/>GeckoTerminal<br/><i>free cuts</i>] -->|survivors| B[⛓️ Chain check<br/>Solana RPC<br/><i>mint · freeze · real top 10</i>]
-    B -->|facts pass| C[🧠 Analyst<br/>Claude Opus 5.5<br/><i>typed thesis 0-10</i>]
+    B -->|facts pass| C[🧠 Analyst<br/>Claude, or your thesis<br/><i>typed thesis 0-10</i>]
     C -->|valid_setup| D[🛡️ Risk engine<br/>plain Python<br/><i>size · limits · daily stop</i>]
     D -->|approved| E[✍️ You<br/>alert · paper fill<br/><i>journal · kill switch</i>]
     A -.->|reason| J[(journal.jsonl)]
@@ -81,7 +92,7 @@ flowchart LR
 | --- | --- | --- | :---: |
 | 🚀 **Scanner** | [`desk/scanner.py`](desk/scanner.py) | Fresh pump.fun / PumpSwap pools from GeckoTerminal. Kills on age, liquidity, volume, market cap, trade count and sell ratio. | ❌ |
 | ⛓️ **Chain check** | [`desk/chain.py`](desk/chain.py) | Mint and freeze authority, top wallet and top 10 share of **real wallets**. The curve and pool are excluded by owner program. | ❌ |
-| 🧠 **Analyst** | [`desk/analyst.py`](desk/analyst.py) | Claude Opus 5.5 fills a typed `TokenThesis`: verdict, score, red flags, shape, invalidation, sources. Never "buy". | ✅ |
+| 🧠 **Analyst** | [`desk/analyst.py`](desk/analyst.py) · [`analyst_inbox.py`](analyst_inbox.py) | Claude Opus 5.5, or an external thesis from the queue. Either way the result is a typed `TokenThesis`: verdict, score, red flags, shape, invalidation, sources. Never "buy". | ✅ / external |
 | 🛡️ **Risk engine** | [`desk/risk.py`](desk/risk.py) | Verdict and score gates, quiet hours, daily loss stop, max positions. Ticket = `min(risk cap, size cap, 2% of pool)`. | ❌ |
 | ✍️ **You** | [`desk/broker.py`](desk/broker.py) · [`desk/ops.py`](desk/ops.py) | Paper fills with fees and slippage, rule-based exits, journal, bench, Telegram alerts, kill switch. | ❌ |
 
@@ -102,6 +113,37 @@ class TokenThesis(BaseModel):
     shape: Literal["crowd", "one_buyer", "fading", "too_early"]
     invalidation: str                                  # what would prove this wrong
     sources: list[str]                                 # input fields it rests on
+```
+
+External mode writes one JSON object per line to `analyst_queue.jsonl`. `status` is `pending`, then `done` after a thesis is accepted, or `expired` after `ANALYST_QUEUE_TTL_MINUTES`. `queued_at` is UTC. Quiet hours and the daily-loss day use Africa/Lagos, not this timestamp.
+
+```json
+{
+  "token": "<token address>",
+  "symbol": "DOGE",
+  "scanner": {"mint": "<token address>", "symbol": "DOGE", "age_minutes": 45,
+              "liquidity_usd": 30000, "volume_h1": 60000, "mcap_usd": 200000,
+              "price_usd": 0.0002},
+  "chain": {"mint_authority": null, "freeze_authority": null,
+            "top_wallet_pct": 0.02, "top_10_pct": 0.1, "program_held_pct": 0.7},
+  "links": {"x": null, "telegram": "https://t.me/example", "website": null},
+  "queued_at": "2026-10-30T13:47:00+00:00",
+  "status": "pending"
+}
+```
+
+The file you pass to `analyst_inbox.py submit` is the thesis and nothing else. `verdict` `buy` is rejected. Score is clamped to 0–10 before the risk engine sees it.
+
+```json
+{
+  "verdict": "valid_setup",
+  "score": 8,
+  "red_flags": ["no website"],
+  "green_flags": ["buys and buyers both rising"],
+  "shape": "crowd",
+  "invalidation": "buyers_h1 stops rising",
+  "sources": ["buyers_h1", "volume_h1"]
+}
 ```
 
 Every string a stranger wrote (token names, links, headlines) reaches the model wrapped as untrusted data. Even a fooled analyst can't size a position or place an order: those jobs belong to code.
@@ -141,7 +183,7 @@ The repo ships the core desk. Around it, every tool has one job:
 | | GitHub | Every rule change, versioned |
 | | Obsidian | The vault: rules, journal, wallet blacklist, narratives |
 
-Only Claude is wired into the code. The rest sit around it in the workflow: see [`docs/STACK.md`](docs/STACK.md) for the research loop and copy-paste prompts.
+Only Claude is wired in as a model. Leave the key empty and that seat waits for a thesis you submit. The other tools sit around the desk in the workflow: see [`docs/STACK.md`](docs/STACK.md) for the research loop and copy-paste prompts.
 
 ## ⚙️ Config
 
@@ -155,15 +197,19 @@ Every number lives in [`config.py`](config.py). Retune there and nowhere else. T
 | | min trades 1h / sell ratio | 120 / 0.15 |
 | Chain | max top wallet / top 10 | 5% / 25% |
 | | mint or freeze authority | hard no |
-| Analyst | model / min score | `claude-opus-5-5` / 7 |
+| Analyst | mode | `auto`: Claude if `ANTHROPIC_API_KEY` is set, otherwise the external queue. `claude` or `external` forces it |
+| | model / min score | `claude-opus-5-5` / 7 |
+| | queue TTL | 30 minutes, then the row is marked expired and skipped |
+| Clock | timezone | `Africa/Lagos` |
 | Risk | risk per trade / max position | 1% / 2% of equity |
 | | max share of pool | 2% |
 | | daily loss stop / max positions | -3% / 3 |
-| | quiet hours | 01:00 to 07:00 local |
+| | quiet hours | 01:00 to 07:00 Africa/Lagos |
+| | daily-loss day | resets at midnight Africa/Lagos |
 
 ## 💸 What it costs
 
-The analyst only sees tokens that survived every free check, capped at 3 calls per cycle. One call is roughly 1,500 tokens in and 600 out: about **$0.02** at Opus 5.5 list prices ($4 / $20 per million). A busy day of 300 calls is about $5. A dead market costs almost nothing. Check Anthropic's pricing page for current rates.
+The analyst only sees tokens that survived every free check, capped at 3 per cycle. In Claude mode that is 3 API calls. In external mode it is 3 rows appended to the queue, and no API call. One Claude call is roughly 1,500 tokens in and 600 out: about **$0.02** at Opus 5.5 list prices ($4 / $20 per million). A busy day of 300 calls is about $5. A dead market costs almost nothing. Check Anthropic's pricing page for current rates.
 
 ## 📊 Sunday review
 
@@ -178,14 +224,18 @@ Read the rejections, not just the trades. They tell you whether your filters cut
 
 ```
 ai-trading-desk/
-├── config.py           every threshold
+├── config.py           every threshold, analyst mode, queue TTL, timezone
 ├── run_crypto.py       the loop: scan → chain → analyst → risk → paper
+├── analyst_inbox.py    external analyst: list the queue, submit a thesis
 ├── run_stocks.py       Alpaca paper, OTO orders with the stop attached
 ├── review.py           weekly stats + optional Claude review
 ├── desk/
 │   ├── scanner.py      seat 1: GeckoTerminal + DexScreener
 │   ├── chain.py        seat 2: Solana RPC facts
 │   ├── analyst.py      seat 3: Claude, typed theses, untrusted-input wrapping
+│   ├── queue.py        analyst_queue.jsonl
+│   ├── pipeline.py     thesis → risk → journal → alert → paper
+│   ├── clock.py        Africa/Lagos desk clock
 │   ├── risk.py         seat 4: pure-code sizing and limits
 │   ├── broker.py       seat 5: paper broker + rule-based exits
 │   └── ops.py          journal, bench, Telegram, kill switch
@@ -209,6 +259,12 @@ ai-trading-desk/
 <summary><b>Can it trade live on Solana?</b></summary>
 
 No, by design. It alerts you with the mint, links and the thesis, and you decide in your own terminal. That signature is the last check.
+</details>
+
+<details>
+<summary><b>What if I don't have an Anthropic key?</b></summary>
+
+Leave `ANTHROPIC_API_KEY` empty, or set `ANALYST_MODE=external`. One shadow cycle queues the survivors. `analyst_inbox.py list` shows them, and `submit` takes a thesis JSON file (or stdin) for a token address. Expired rows are skipped. The risk engine and the paper broker are the same ones Claude uses.
 </details>
 
 <details>
