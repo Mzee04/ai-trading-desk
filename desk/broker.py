@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 
 from config import EXITS, PAPER
+from desk.clock import desk_today
 
 LEDGER = Path("paper_ledger.json")
 
@@ -23,7 +24,7 @@ class PaperBroker:
             self.s = json.loads(path.read_text())
         else:
             eq = PAPER["starting_equity_usd"]
-            self.s = {"cash": eq, "positions": {}, "day": str(date.today()), "day_start": eq,
+            self.s = {"cash": eq, "positions": {}, "day": str(desk_today()), "day_start": eq,
                       "closed": []}
         self._roll_day()
 
@@ -31,9 +32,11 @@ class PaperBroker:
     def _save(self):
         self.path.write_text(json.dumps(self.s, indent=1))
 
-    def _roll_day(self):
-        if self.s["day"] != str(date.today()):
-            self.s["day"], self.s["day_start"] = str(date.today()), self.equity()
+    def _roll_day(self, now: datetime | None = None):
+        """Reset day PnL when the desk-timezone date changes. The loss rule itself is unchanged."""
+        today = str(desk_today(now))
+        if self.s["day"] != today:
+            self.s["day"], self.s["day_start"] = today, self.equity()
             self._save()
 
     def equity(self, marks: dict[str, float] | None = None) -> float:

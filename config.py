@@ -33,6 +33,13 @@ ANALYST_MODEL = "claude-opus-5-5"
 REVIEW_MODEL = "claude-sonnet-5-5"   # cheaper model for the weekly review
 ANALYST_MAX_TOKENS = 8_000
 MIN_SCORE = 7                        # 0-10, the analyst's score must clear this
+# "auto": Claude when ANTHROPIC_API_KEY is set, otherwise the external queue.
+# "claude" or "external" forces that seat. Env ANALYST_MODE overrides this.
+ANALYST_MODE = "auto"
+ANALYST_QUEUE_TTL_MINUTES = 30       # pending external-analyst rows older than this expire
+
+# Desk clock. Quiet hours and the daily-loss day both use this zone.
+TIMEZONE = "Africa/Lagos"
 
 # ---------- Seat 4: risk engine (pure code) ----------
 RISK = {
@@ -42,7 +49,7 @@ RISK = {
     "max_open_positions": 3,
     "max_daily_loss_pct": 0.03,    # down 3% on the day -> desk stops until tomorrow
     "min_ticket_usd": 10,          # below this, fees eat the edge
-    "quiet_hours": (1, 7),         # local hours with no new entries (1 AM to 7 AM)
+    "quiet_hours": (1, 7),         # desk-timezone hours with no new entries (1 AM to 7 AM)
 }
 
 # ---------- Seat 5: exits (paper broker applies these, no model involved) ----------

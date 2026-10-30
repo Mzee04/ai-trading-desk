@@ -1,10 +1,13 @@
-.PHONY: test shadow paper stocks review review-claude kill
+.PHONY: test shadow paper stocks review review-claude inbox kill
 
 test:            ## run the offline test suite
 	python -m unittest discover -s tests -v
 
-shadow:          ## one full cycle, journal + alerts, no position
+shadow:          ## one cycle, no paper fill; queues tokens when the analyst is external
 	python run_crypto.py --shadow --once
+
+inbox:           ## list tokens waiting on the external analyst
+	python analyst_inbox.py list
 
 paper:           ## paper trading, every 60 seconds
 	python run_crypto.py

@@ -40,6 +40,14 @@ sequenceDiagram
     L->>J: cycle stats
 ```
 
+## External analyst
+
+`ANALYST_MODE=auto` calls Claude when `ANTHROPIC_API_KEY` is set. Otherwise the cycle does not call the model: each chain-check survivor is appended to `analyst_queue.jsonl` (token address, symbol, scanner and chain data, links, `queued_at`). `analyst_inbox.py submit` validates a `TokenThesis` and then runs the same risk engine, journal, alert, and paper fill a Claude thesis would. Pending rows older than `ANALYST_QUEUE_TTL_MINUTES` (default 30) are marked `expired` and skipped.
+
+The same per-cycle analyst budget still caps how many survivors are queued, so a cycle cannot flood the inbox.
+
+Quiet hours and the daily-loss day use `TIMEZONE` (`Africa/Lagos` by default), not the machine clock. The comparisons and the loss threshold are unchanged.
+
 ## Budgets
 
 | Resource | Per cycle | Why |

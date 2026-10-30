@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- External analyst: with no `ANTHROPIC_API_KEY`, or `ANALYST_MODE=external`, chain-check survivors are appended to `analyst_queue.jsonl` instead of calling Claude. `ANALYST_MODE=claude` forces Claude.
+- `analyst_inbox.py` lists the queue and submits a `TokenThesis` (skip / watch / valid_setup, never buy) through the same risk, journal, alert, and paper path. Rows older than `ANALYST_QUEUE_TTL_MINUTES` (30) are marked expired and skipped.
+- Desk clock defaults to `Africa/Lagos`. Quiet hours and the daily-loss day use that zone. Risk thresholds are unchanged.
+
 ## v1.0.0 · 2026-10-26
 
 - Five seats: scanner, chain check, Claude analyst, risk engine, paper execution

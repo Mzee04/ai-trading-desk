@@ -5,7 +5,11 @@
     python run_crypto.py --once     one cycle, then exit (good for testing)
 
 Each pass is more expensive than the one before it, so each one has to kill harder:
-  scanner (free) -> chain facts (RPC) -> analyst (paid) -> risk engine (code) -> paper fill
+  scanner (free) -> chain facts (RPC) -> analyst -> risk engine (code) -> paper fill
+
+The analyst seat is Claude when ANTHROPIC_API_KEY is set. Otherwise (or when
+ANALYST_MODE=external) survivors are appended to analyst_queue.jsonl and scored
+later with analyst_inbox.py. The risk engine does not change either way.
 """
 from __future__ import annotations
 
@@ -18,7 +22,8 @@ from config import CYCLE_SECONDS
 from desk import analyst, chain, scanner
 from desk.broker import PaperBroker
 from desk.ops import Bench, alert, journal, killed, load_env
-from desk.risk import Account, check_token_trade
+from desk.pipeline import apply_thesis
+from desk.queue import enqueue, resolve_analyst_mode
 
 CHAIN_BUDGET = 8      # RPC fact checks per cycle
 ANALYST_BUDGET = 3    # Claude calls per cycle: caps the bill no matter what the market does
@@ -39,7 +44,8 @@ def manage_positions(broker: PaperBroker, bench: Bench, s: requests.Session):
 
 
 def cycle(broker: PaperBroker, bench: Bench, s: requests.Session, shadow: bool) -> dict:
-    stats = {"seen": 0, "benched": 0, "free": 0, "chain": 0, "analyst": 0, "risk": 0, "entries": 0}
+    stats = {"seen": 0, "benched": 0, "free": 0, "chain": 0, "analyst": 0, "risk": 0,
+             "entries": 0, "queued": 0}
     manage_positions(broker, bench, s)
 
     chain_left, analyst_left = CHAIN_BUDGET, ANALYST_BUDGET
@@ -72,35 +78,26 @@ def cycle(broker: PaperBroker, bench: Bench, s: requests.Session, shadow: bool) 
             continue
 
         links = scanner.socials(t["mint"], s)                 # pass 3: analyst
-        try:
+        if resolve_analyst_mode() == "external":
+            try:
+                rec = enqueue(t, f, links)
+            except Exception as e:
+                journal("error", stage="analyst", mint=t["mint"], error=str(e))
+                continue
+            analyst_left -= 1
+            bench.sit(t["mint"], "queued")
+            journal("queued", mint=t["mint"], symbol=t["symbol"], queued_at=rec["queued_at"])
+            stats["queued"] += 1
+            continue
+
+        try:                                                  # Claude, unchanged
             th = analyst.analyze_token(t, f, links)
         except Exception as e:
             journal("error", stage="analyst", mint=t["mint"], error=str(e))
             continue
         analyst_left -= 1
-
-        acct = Account(equity=broker.equity(), day_pnl=broker.day_pnl(),
-                       open_positions=broker.open_count())
-        ok, ticket, reason = check_token_trade(th, acct, t["liquidity_usd"])   # pass 4: code
-        journal("decision", mint=t["mint"], symbol=t["symbol"], token=t, facts=f,
-                links=links, thesis=th.model_dump(), approved=ok, ticket_usd=ticket,
-                reason=reason, shadow=shadow)
-        if not ok:
-            bench.sit(t["mint"], th.verdict if th.verdict != "valid_setup" else "score")
-            stats["analyst" if th.verdict != "valid_setup" else "risk"] += 1
-            continue
-
-        flags = "; ".join(th.red_flags[:2]) or "none"
-        alert(f"VALID SETUP ${t['symbol']} score {th.score}/10 | ticket ${ticket}\n"
-              f"mcap ${t['mcap_usd']:,.0f} liq ${t['liquidity_usd']:,.0f} "
-              f"top10 {f['top_10_pct']:.1%}\nred flags: {flags}\n"
-              f"invalidation: {th.invalidation}\n"
-              f"https://pump.fun/coin/{t['mint']}\n"
-              f"https://dexscreener.com/solana/{t['mint']}")
-        if not shadow:                                        # pass 5: paper fill
-            fill = broker.buy(t["mint"], t["symbol"], ticket, t["price_usd"])
-            journal("entry", **fill)
-        stats["entries"] += 1
+        decision = apply_thesis(broker, bench, t, f, links, th, shadow)   # pass 4 + paper
+        stats[decision.bucket] += 1
 
     journal("cycle", **stats, equity=broker.equity(), day_pnl=broker.day_pnl())
     return stats
